@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Split Tests</title>
+<style>
+  body { font: 15px/1.5 -apple-system, system-ui, sans-serif; margin: 24px; color: #1D1D1F; }
+  li.fail { color: #E3263A; } #summary { font-weight: 700; font-size: 18px; }
+</style>
+</head>
+<body>
+<h1>Revenue split tests</h1>
+<p id="summary">Running…</p>
+<ul id="results"></ul>
+<!-- Classic scripts: open this file directly, no server needed. -->
+<script src="i18n.js"></script>
+<script src="core.js"></script>
+<script>
+  const s = createSeed();
+  const results = [];
+  const eq = (name, got, want) => results.push({ name, ok: got === want, got, want });
+  const amt = (sp, key, id) => sum(sp.lines.filter((l) => l.key === key && (!id || l.partyId === id)), (l) => l.cents);
+  function example(label, edId, sales, lines) {
+    const sp = editionSplit(s, s.editions[edId]);
+    eq(`${label}: net sales`, sp.salesCents, sales);
+    eq(`${label}: lines sum to sales`, sp.check, sales);
+    for (const [k, id, c] of lines) eq(`${label}: ${k}${id ? ' ' + id : ''}`, amt(sp, k, id), c);
+  }
+  example('A Ana 20×€12', 'e-ana-6', 24000, [['business', null, 16800], ['promoter', 'ana', 3600], ['project', null, 2640], ['platform', null, 960], ['referral', null, 0]]);
+  example('B Luis 20×€10', 'e-luis-3', 20000, [['business', null, 14000], ['promoter', 'luis', 3000], ['referral', 'ana', 200], ['project', null, 2000], ['platform', null, 800]]);
+  example('C Marta 10×€30', 'e-marta-1', 30000, [['business', null, 21000], ['promoter', 'marta', 4500], ['referral', 'luis', 300], ['referral', 'ana', 240], ['project', null, 2760], ['platform', null, 1200]]);
+  example('D Javier 22×€8', 'e-javier-4', 17600, [['business', null, 12320], ['promoter', 'javier', 2640], ['project', null, 1936], ['platform', null, 704]]);
+  const tick = ticketSplit(s, s.activities['act-ana']);
+  eq('€12 ticket: café €8.40', amt(tick, 'business'), 840);
+  eq('€12 ticket: project €1.32 (incl. unused referral)', amt(tick, 'project'), 132);
+  const deep = { a: { uplineId: null }, b: { uplineId: 'a' }, c: { uplineId: 'b' }, d: { uplineId: 'c' }, e: { uplineId: 'd' }, f: { uplineId: 'e' }, g: { uplineId: 'f' } };
+  eq('Chain capped at 5', uplineChain('g', deep).length, 5);
+  const full = splitSales({ salesCents: 100000, promoterId: 'g', venueId: 'v', projectId: 'p' }, deep);
+  eq('€1,000 with 5 uplines: referral €30', amt(full, 'referral'), 3000);
+  eq('€1,000 with 5 uplines: project exactly 8%', amt(full, 'project'), 8000);
+  eq('Cycle-safe chain', uplineChain('x', { x: { uplineId: 'y' }, y: { uplineId: 'x' } }).join(), 'y');
+  const co = splitSales({ salesCents: 21600, promoterId: 'ana', coOrganiserId: 'sofia', venueId: 'tertulia', projectId: 'aulas' }, s.people);
+  eq('Co-organiser 50/50: Ana', amt(co, 'promoter'), 1620);
+  eq('Co-organiser 50/50: Sofía', amt(co, 'coorganiser'), 1620);
+  for (const c of [1, 7, 333, 999, 12345, 99999]) eq(`Rounding ${c}c sums exactly`, splitSales({ salesCents: c, promoterId: 'marta', venueId: 'v', projectId: 'p' }, s.people).check, c);
+  eq('Language template: avg 18 attendees', templateStats(s, 'language').avgAttendance, 18);
+  state = s; maintain(s);
+  eq('Seed keeps an upcoming edition per weekly activity', ['act-ana', 'act-luis', 'act-javier'].every((id) => upcoming(s).some((e) => e.activityId === id)), true);
+  const failed = results.filter((r) => !r.ok);
+  document.getElementById('results').innerHTML = results.map((r) => `<li class="${r.ok ? '' : 'fail'}">${r.ok ? '✓' : '✗'} ${r.name}${r.ok ? '' : ` — got ${r.got}, want ${r.want}`}</li>`).join('');
+  document.getElementById('summary').textContent = failed.length ? `${failed.length} of ${results.length} FAILED` : `All ${results.length} tests passed`;
+</script>
+</body>
+</html>
